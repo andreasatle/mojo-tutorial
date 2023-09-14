@@ -3,7 +3,8 @@ from random import rand, seed
 from memory import memset_zero
 from benchmark import Benchmark
 from algorithm import vectorize, parallelize
-alias nelts = simdwidthof[DType.float32]()
+from runtime.llcl import Runtime
+alias nelts: Int = simdwidthof[DType.float32]()
 
 @value
 struct Matrix:
@@ -12,15 +13,24 @@ struct Matrix:
     var cols: Int
 
     fn __init__(inout self, rows: Int, cols: Int):
-        self.rows = rows
-        self.cols = cols
-        self.data = DTypePointer[DType.float32].alloc(rows * cols)
-        seed(4711) # Reset the seed everytime, so results are the same.
-        rand(self.data, rows*cols)
+        # Pad to a multiple of the SIMD width
+        self.rows = ((rows+nelts-1)//nelts)*nelts
+        self.cols = ((cols+nelts-1)//nelts)*nelts
+        self.data = DTypePointer[DType.float32].alloc(self.rows * self.cols)
+        self.zero()
 
     @always_inline
     fn zero(inout self):
         memset_zero(self.data, self.rows * self.cols)
+
+    @always_inline
+    fn randomize(inout self):
+        rand(self.data, self.rows*self.cols)
+
+    @always_inline
+    fn randomize(inout self, s: Int):
+        seed(s) # Reset the seed everytime, so results are the same.
+        self.randomize()
 
     @always_inline
     fn __getitem__(self, i: Int, j: Int) -> Float32:
@@ -64,7 +74,7 @@ fn matmul_vectorized(inout C: Matrix, A: Matrix, B: Matrix):
             vectorize[nelts,inner](C.cols)
 
 # Parallelize over the rows
-fn matmul_parallelized(inout C: Matrix, A: Matrix, B: Matrix):
+fn matmul_parallelized(inout C: Matrix, A: Matrix, B: Matrix, rt: Runtime):
     C.zero()
 
     @parameter
@@ -74,38 +84,47 @@ fn matmul_parallelized(inout C: Matrix, A: Matrix, B: Matrix):
             fn inner[nelts: Int](n: Int):
                 C.store[nelts](m, n, C.load[nelts](m, n) + A[m,k] * B.load[nelts](k, n))
             vectorize[nelts,inner](C.cols)
-    parallelize[outer](C.rows)
+    parallelize[outer](rt, C.rows)
 
 fn test[n: Int, m: Int, k: Int]():
-
-    fn naive_test() -> None:
-        let A = Matrix(m,k)
-        let B = Matrix(k,n)
+    with Runtime() as rt:
+        var A = Matrix(m,k)
+        var B = Matrix(k,n)
         var C = Matrix(m,n)
-        _ = matmul_naive(C, A, B)
+        A.randomize(4711)
+        B.randomize(4711)
 
-    fn vectorized_test() -> None:
-        let A = Matrix(m,k)
-        let B = Matrix(k,n)
-        var C = Matrix(m,n)
-        _ = matmul_vectorized(C, A, B)
+        @always_inline
+        @parameter
+        fn naive_test():
+            _ = matmul_naive(C, A, B)
+            print(C[0,0])
 
-    fn parallelized_test() -> None:
-        let A = Matrix(m,k)
-        let B = Matrix(k,n)
-        var C = Matrix(m,n)
-        _ = matmul_parallelized(C, A, B)
+        @always_inline
+        @parameter
+        fn vectorized_test():
+            _ = matmul_vectorized(C, A, B)
+            print(C[0,0])
 
-    print("Naive matmul     :", Benchmark().run[naive_test]())
-    print("Vectorized matmul:", Benchmark().run[vectorized_test]())
-    print("Parallelized matmul:", Benchmark().run[parallelized_test]())
+        @always_inline
+        @parameter
+        fn parallelized_test():
+            _ = matmul_parallelized(C, A, B, rt)
+            print(C[0,0])
+
+        print("Naive matmul     :", Benchmark().run[naive_test]())
+        print("Vectorized matmul:", Benchmark().run[vectorized_test]())
+        print("Parallelized matmul:", Benchmark().run[parallelized_test]())
 
 fn main():
     alias n: Int = 199
     alias m: Int = 12031
     alias k: Int = 111
     print("nelts:", nelts)
+    let q = 8
+    print("q:", (q+nelts-1)//nelts*nelts)
     test[n,m,k]()
+
     
 
     
