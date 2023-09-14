@@ -98,23 +98,23 @@ fn test[n: Int, m: Int, k: Int]():
         @parameter
         fn naive_test():
             _ = matmul_naive(C, A, B)
-            print(C[0,0])
 
         @always_inline
         @parameter
         fn vectorized_test():
             _ = matmul_vectorized(C, A, B)
-            print(C[0,0])
 
         @always_inline
         @parameter
         fn parallelized_test():
             _ = matmul_parallelized(C, A, B, rt)
-            print(C[0,0])
 
-        print("Naive matmul     :", Benchmark().run[naive_test]())
-        print("Vectorized matmul:", Benchmark().run[vectorized_test]())
-        print("Parallelized matmul:", Benchmark().run[parallelized_test]())
+        let naive_time = Benchmark().run[naive_test]()
+        let vectorized_time = Benchmark().run[vectorized_test]()
+        let parallelized_time = Benchmark().run[parallelized_test]()
+        #print("Naive matmul       :", naive_time)
+        print("Speedup Vectorized matmul  :", naive_time/vectorized_time)
+        print("Speedup Parallelized matmul:", naive_time/parallelized_time)
 
 fn main():
     alias n: Int = 199
